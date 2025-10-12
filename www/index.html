@@ -1,6 +1,6 @@
 <!doctype html>
 <html><head>
-	<title>Finite State Machine Designer - by Evan Wallace</title>
+	<title>Finite State Machine Designer - Coop's Version</title>
   <meta charset="utf-8">
 	<style>
 
@@ -58,6 +58,8 @@ textarea {
 	margin: 0 auto;
 }
 
+
+
   </style>
 	<script src="fsm.js"></script>
 	<script>
@@ -98,24 +100,42 @@ if (typeof btoa == 'undefined') {
 	</script>
 </head><body>
 	<h1>Finite State Machine Designer</h1>
+	<p style="margin-top: -20px; font-style: italic; color: #666;">Coop's Version</p>
 	<canvas id="canvas" width="800" height="600">
 		<span class="error">Your browser does not support<br>the HTML5 &lt;canvas&gt; element</span>
 	</canvas>
 	<div>
-		<p class="center">Export as: <a href="javascript:saveAsPNG()">PNG</a> | <a href="javascript:saveAsSVG()">SVG</a> | <a href="javascript:saveAsLaTeX()">LaTeX</a></p>
+		<p class="center">
+			<button onclick="undo()" style="background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 5px;">↶ Undo</button>
+			<button onclick="redo()" style="background-color: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 10px;">↷ Redo</button>
+			<button onclick="clearAll()" style="background-color: #ff4444; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 10px;">Clear All</button>
+		</p>
+		<p class="center">
+		Export as: <a href="javascript:saveAsPNG()">PNG</a> | <a href="javascript:saveAsSVG()">SVG</a> | <a href="javascript:saveAsLaTeX()">LaTeX</a></p>
 		<textarea id="output"></textarea>
 		<p>The big white box above is the FSM designer.&nbsp; Here's how to use it:</p>
 		<ul>
 			<li><b>Add a state:</b> double-click on the canvas</li>
 			<li><b>Add an arrow:</b> shift-drag on the canvas</li>
 			<li><b>Move something:</b> drag it around</li>
+			<li><b>Select multiple states:</b> drag on empty canvas to create selection box</li>
+			<li><b>Move selection:</b> drag any selected state to move all selected states</li>
 			<li><b>Delete something:</b> click it and press the delete key (not the backspace key)</li>
-		</ul><ul>
+		</ul>
+		
+		<ul>
 			<li><b>Make accept state:</b> double-click on an existing state</li>
 			<li><b>Type numeric subscript:</b> put an underscore before the number (like "S_0")</li>
 			<li><b>Type greek letter:</b> put a backslash before it (like "\beta")</li>
 		</ul>
+
+		<ul>
+			<li><b>Undo Change:</b> Ctrl + Z</li>
+			<li><b>Redo Change:</b> Ctrl + Y</li>
+			<li><b>Select Nodes:</b> Click and drag to create a selection box.</li>
+		</ul>
 		<p>This was made in HTML5 and JavaScript using the canvas element.</p>
 	</div>
 	<p>Created by <a href="http://madebyevan.com/">Evan Wallace</a> in 2010</p>
+	<p>Modified by Cooper Jumamil in 2025</p>
 </body></html>
