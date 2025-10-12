@@ -668,6 +668,11 @@ var nodeRadius = 30;
 var nodes = [];
 var links = [];
 
+// Undo/Redo system
+var undoStack = [];
+var redoStack = [];
+var maxUndoSteps = 50;
+
 var cursorVisible = true;
 var snapToPadding = 6; // pixels
 var hitTargetPadding = 6; // pixels
@@ -776,11 +781,13 @@ window.onload = function() {
 		selectedObject = selectObject(mouse.x, mouse.y);
 
 		if(selectedObject == null) {
+			saveState(); // Save state before adding node
 			selectedObject = new Node(mouse.x, mouse.y);
 			nodes.push(selectedObject);
 			resetCaret();
 			draw();
 		} else if(selectedObject instanceof Node) {
+			saveState(); // Save state before changing accept state
 			selectedObject.isAcceptState = !selectedObject.isAcceptState;
 			draw();
 		}
@@ -827,6 +834,7 @@ window.onload = function() {
 
 		if(currentLink != null) {
 			if(!(currentLink instanceof TemporaryLink)) {
+				saveState(); // Save state before adding link
 				selectedObject = currentLink;
 				links.push(currentLink);
 				resetCaret();
@@ -844,6 +852,12 @@ document.onkeydown = function(e) {
 
 	if(key == 16) {
 		shift = true;
+	} else if(e.ctrlKey && key == 90) { // Ctrl+Z for undo
+		undo();
+		return false;
+	} else if(e.ctrlKey && key == 89) { // Ctrl+Y for redo
+		redo();
+		return false;
 	} else if(!canvasHasFocus()) {
 		// don't read keystrokes when other things have focus
 		return true;
@@ -858,6 +872,7 @@ document.onkeydown = function(e) {
 		return false;
 	} else if(key == 46) { // delete key
 		if(selectedObject != null) {
+			saveState(); // Save state before deleting
 			for(var i = 0; i < nodes.length; i++) {
 				if(nodes[i] == selectedObject) {
 					nodes.splice(i--, 1);
@@ -970,6 +985,220 @@ function saveAsLaTeX() {
 	selectedObject = oldSelectedObject;
 	var texData = exporter.toLaTeX();
 	output(texData);
+}
+
+// Undo/Redo functionality
+function saveState() {
+	// Create a serializable copy of the current state
+	var state = {
+		nodes: [],
+		links: []
+	};
+	
+	// Serialize nodes
+	for (var i = 0; i < nodes.length; i++) {
+		var node = nodes[i];
+		state.nodes.push({
+			x: node.x,
+			y: node.y,
+			isAcceptState: node.isAcceptState,
+			text: node.text
+		});
+	}
+	
+	// Serialize links
+	for (var i = 0; i < links.length; i++) {
+		var link = links[i];
+		var linkData = {
+			text: link.text
+		};
+		
+		if (link instanceof SelfLink) {
+			linkData.type = 'SelfLink';
+			linkData.nodeIndex = nodes.indexOf(link.node);
+			linkData.anchorAngle = link.anchorAngle;
+		} else if (link instanceof Link) {
+			linkData.type = 'Link';
+			linkData.nodeAIndex = nodes.indexOf(link.nodeA);
+			linkData.nodeBIndex = nodes.indexOf(link.nodeB);
+			linkData.lineAngleAdjust = link.lineAngleAdjust;
+			linkData.parallelPart = link.parallelPart;
+			linkData.perpendicularPart = link.perpendicularPart;
+		}
+		
+		state.links.push(linkData);
+	}
+	
+	undoStack.push(state);
+	
+	// Limit the undo stack size
+	if (undoStack.length > maxUndoSteps) {
+		undoStack.shift();
+	}
+	
+	// Clear redo stack when a new action is performed
+	redoStack = [];
+}
+
+function restoreState(state) {
+	if (!state) return;
+	
+	// Clear current objects
+	nodes = [];
+	links = [];
+	selectedObject = null;
+	
+	// Restore nodes
+	for (var i = 0; i < state.nodes.length; i++) {
+		var nodeData = state.nodes[i];
+		var node = new Node(nodeData.x, nodeData.y);
+		node.isAcceptState = nodeData.isAcceptState;
+		node.text = nodeData.text;
+		nodes.push(node);
+	}
+	
+	// Restore links
+	for (var i = 0; i < state.links.length; i++) {
+		var linkData = state.links[i];
+		var link;
+		
+		if (linkData.type === 'SelfLink') {
+			var node = nodes[linkData.nodeIndex];
+			if (node) {
+				link = new SelfLink(node);
+				link.anchorAngle = linkData.anchorAngle;
+				link.text = linkData.text;
+			}
+		} else if (linkData.type === 'Link') {
+			var nodeA = nodes[linkData.nodeAIndex];
+			var nodeB = nodes[linkData.nodeBIndex];
+			if (nodeA && nodeB) {
+				link = new Link(nodeA, nodeB);
+				link.text = linkData.text;
+				link.lineAngleAdjust = linkData.lineAngleAdjust;
+				link.parallelPart = linkData.parallelPart;
+				link.perpendicularPart = linkData.perpendicularPart;
+			}
+		}
+		
+		if (link) {
+			links.push(link);
+		}
+	}
+	
+	draw();
+}
+
+function undo() {
+	if (undoStack.length === 0) return;
+	
+	// Save current state to redo stack in the same format
+	var currentState = {
+		nodes: [],
+		links: []
+	};
+	
+	// Serialize current nodes
+	for (var i = 0; i < nodes.length; i++) {
+		var node = nodes[i];
+		currentState.nodes.push({
+			x: node.x,
+			y: node.y,
+			isAcceptState: node.isAcceptState,
+			text: node.text
+		});
+	}
+	
+	// Serialize current links
+	for (var i = 0; i < links.length; i++) {
+		var link = links[i];
+		var linkData = {
+			text: link.text
+		};
+		
+		if (link instanceof SelfLink) {
+			linkData.type = 'SelfLink';
+			linkData.nodeIndex = nodes.indexOf(link.node);
+			linkData.anchorAngle = link.anchorAngle;
+		} else if (link instanceof Link) {
+			linkData.type = 'Link';
+			linkData.nodeAIndex = nodes.indexOf(link.nodeA);
+			linkData.nodeBIndex = nodes.indexOf(link.nodeB);
+			linkData.lineAngleAdjust = link.lineAngleAdjust;
+			linkData.parallelPart = link.parallelPart;
+			linkData.perpendicularPart = link.perpendicularPart;
+		}
+		
+		currentState.links.push(linkData);
+	}
+	
+	redoStack.push(currentState);
+	
+	// Restore previous state
+	var previousState = undoStack.pop();
+	restoreState(previousState);
+}
+
+function redo() {
+	if (redoStack.length === 0) return;
+	
+	// Save current state using the existing saveState function logic
+	var currentState = {
+		nodes: [],
+		links: []
+	};
+	
+	// Serialize current nodes
+	for (var i = 0; i < nodes.length; i++) {
+		var node = nodes[i];
+		currentState.nodes.push({
+			x: node.x,
+			y: node.y,
+			isAcceptState: node.isAcceptState,
+			text: node.text
+		});
+	}
+	
+	// Serialize current links
+	for (var i = 0; i < links.length; i++) {
+		var link = links[i];
+		var linkData = {
+			text: link.text
+		};
+		
+		if (link instanceof SelfLink) {
+			linkData.type = 'SelfLink';
+			linkData.nodeIndex = nodes.indexOf(link.node);
+			linkData.anchorAngle = link.anchorAngle;
+		} else if (link instanceof Link) {
+			linkData.type = 'Link';
+			linkData.nodeAIndex = nodes.indexOf(link.nodeA);
+			linkData.nodeBIndex = nodes.indexOf(link.nodeB);
+			linkData.lineAngleAdjust = link.lineAngleAdjust;
+			linkData.parallelPart = link.parallelPart;
+			linkData.perpendicularPart = link.perpendicularPart;
+		}
+		
+		currentState.links.push(linkData);
+	}
+	
+	undoStack.push(currentState);
+	
+	// Restore next state
+	var nextState = redoStack.pop();
+	restoreState(nextState);
+}
+
+function clearAll() {
+	// Save current state for undo
+	saveState();
+	
+	// Clear everything
+	nodes = [];
+	links = [];
+	selectedObject = null;
+	
+	draw();
 }
 
 function det(a, b, c, d, e, f, g, h, i) {
