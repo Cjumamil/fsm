@@ -93,6 +93,11 @@ var canvas;
 var nodeRadius = 30;
 var nodes = [];
 var links = [];
+var selectedObjects = []; // Array to hold multiple selected objects
+
+// Selection box variables
+var selectionBox = null;
+var isDrawingSelectionBox = false;
 
 // Undo/Redo system
 var undoStack = [];
@@ -114,18 +119,31 @@ function drawUsing(c) {
 
 	for(var i = 0; i < nodes.length; i++) {
 		c.lineWidth = 1;
-		c.fillStyle = c.strokeStyle = (nodes[i] == selectedObject) ? 'blue' : 'black';
+		var isSelected = (nodes[i] == selectedObject) || (selectedObjects.indexOf(nodes[i]) !== -1);
+		c.fillStyle = c.strokeStyle = isSelected ? 'blue' : 'black';
 		nodes[i].draw(c);
 	}
 	for(var i = 0; i < links.length; i++) {
 		c.lineWidth = 1;
-		c.fillStyle = c.strokeStyle = (links[i] == selectedObject) ? 'blue' : 'black';
+		var isSelected = (links[i] == selectedObject) || (selectedObjects.indexOf(links[i]) !== -1);
+		c.fillStyle = c.strokeStyle = isSelected ? 'blue' : 'black';
 		links[i].draw(c);
 	}
 	if(currentLink != null) {
 		c.lineWidth = 1;
 		c.fillStyle = c.strokeStyle = 'black';
 		currentLink.draw(c);
+	}
+
+	// Draw selection box
+	if(selectionBox != null) {
+		c.lineWidth = 1;
+		c.strokeStyle = 'blue';
+		c.fillStyle = 'rgba(0, 100, 255, 0.1)';
+		var width = selectionBox.endX - selectionBox.startX;
+		var height = selectionBox.endY - selectionBox.startY;
+		c.fillRect(selectionBox.startX, selectionBox.startY, width, height);
+		c.strokeRect(selectionBox.startX, selectionBox.startY, width, height);
 	}
 
 	c.restore();
@@ -176,6 +194,22 @@ window.onload = function() {
 		originalClick = mouse;
 
 		if(selectedObject != null) {
+			// Check if object is already in multi-selection
+			var alreadySelected = selectedObjects.indexOf(selectedObject) !== -1;
+			
+			if(e.ctrlKey || e.metaKey) {
+				// Ctrl+click to add/remove from selection
+				if(alreadySelected) {
+					selectedObjects.splice(selectedObjects.indexOf(selectedObject), 1);
+					selectedObject = selectedObjects.length > 0 ? selectedObjects[0] : null;
+				} else {
+					selectedObjects.push(selectedObject);
+				}
+			} else if(!alreadySelected) {
+				// Regular click - clear multi-selection unless clicking on already selected object
+				selectedObjects = [];
+			}
+
 			if(shift && selectedObject instanceof Node) {
 				currentLink = new SelfLink(selectedObject, mouse);
 			} else {
@@ -184,10 +218,27 @@ window.onload = function() {
 				if(selectedObject.setMouseStart) {
 					selectedObject.setMouseStart(mouse.x, mouse.y);
 				}
+				// Set mouse start for all selected objects
+				for(var i = 0; i < selectedObjects.length; i++) {
+					if(selectedObjects[i].setMouseStart) {
+						selectedObjects[i].setMouseStart(mouse.x, mouse.y);
+					}
+				}
 			}
 			resetCaret();
 		} else if(shift) {
 			currentLink = new TemporaryLink(mouse, mouse);
+		} else {
+			// Start selection box if no object selected and not shift-clicking
+			selectedObjects = [];
+			selectedObject = null;
+			isDrawingSelectionBox = true;
+			selectionBox = {
+				startX: mouse.x,
+				startY: mouse.y,
+				endX: mouse.x,
+				endY: mouse.y
+			};
 		}
 
 		draw();
@@ -246,10 +297,26 @@ window.onload = function() {
 			draw();
 		}
 
+		if(isDrawingSelectionBox) {
+			// Update selection box
+			selectionBox.endX = mouse.x;
+			selectionBox.endY = mouse.y;
+			draw();
+		}
+
 		if(movingObject) {
 			selectedObject.setAnchorPoint(mouse.x, mouse.y);
 			if(selectedObject instanceof Node) {
 				snapNode(selectedObject);
+			}
+			// Move all selected objects together
+			for(var i = 0; i < selectedObjects.length; i++) {
+				if(selectedObjects[i] !== selectedObject && selectedObjects[i].setAnchorPoint) {
+					selectedObjects[i].setAnchorPoint(mouse.x, mouse.y);
+					if(selectedObjects[i] instanceof Node) {
+						snapNode(selectedObjects[i]);
+					}
+				}
 			}
 			draw();
 		}
@@ -257,6 +324,34 @@ window.onload = function() {
 
 	canvas.onmouseup = function(e) {
 		movingObject = false;
+
+		if(isDrawingSelectionBox) {
+			// Finish selection box and select objects within it
+			isDrawingSelectionBox = false;
+			selectedObjects = [];
+			
+			// Calculate selection bounds (handle negative width/height)
+			var minX = Math.min(selectionBox.startX, selectionBox.endX);
+			var maxX = Math.max(selectionBox.startX, selectionBox.endX);
+			var minY = Math.min(selectionBox.startY, selectionBox.endY);
+			var maxY = Math.max(selectionBox.startY, selectionBox.endY);
+			
+			// Select nodes within the box
+			for(var i = 0; i < nodes.length; i++) {
+				if(nodes[i].x >= minX && nodes[i].x <= maxX && 
+				   nodes[i].y >= minY && nodes[i].y <= maxY) {
+					selectedObjects.push(nodes[i]);
+				}
+			}
+			
+			// Select the first object as the primary selection
+			if(selectedObjects.length > 0) {
+				selectedObject = selectedObjects[0];
+			}
+			
+			selectionBox = null;
+			draw();
+		}
 
 		if(currentLink != null) {
 			if(!(currentLink instanceof TemporaryLink)) {
@@ -297,19 +392,48 @@ document.onkeydown = function(e) {
 		// backspace is a shortcut for the back button, but do NOT want to change pages
 		return false;
 	} else if(key == 46) { // delete key
-		if(selectedObject != null) {
+		if(selectedObject != null || selectedObjects.length > 0) {
 			saveState(); // Save state before deleting
+			
+			// Collect all objects to delete (primary selection + multi-selection)
+			var objectsToDelete = [];
+			if(selectedObject != null) {
+				objectsToDelete.push(selectedObject);
+			}
+			for(var i = 0; i < selectedObjects.length; i++) {
+				if(objectsToDelete.indexOf(selectedObjects[i]) === -1) {
+					objectsToDelete.push(selectedObjects[i]);
+				}
+			}
+			
+			// Delete nodes
 			for(var i = 0; i < nodes.length; i++) {
-				if(nodes[i] == selectedObject) {
+				if(objectsToDelete.indexOf(nodes[i]) !== -1) {
 					nodes.splice(i--, 1);
 				}
 			}
+			
+			// Delete links (including those connected to deleted nodes)
 			for(var i = 0; i < links.length; i++) {
-				if(links[i] == selectedObject || links[i].node == selectedObject || links[i].nodeA == selectedObject || links[i].nodeB == selectedObject) {
+				var shouldDelete = objectsToDelete.indexOf(links[i]) !== -1;
+				if(!shouldDelete) {
+					// Check if link is connected to any deleted node
+					for(var j = 0; j < objectsToDelete.length; j++) {
+						if(links[i].node == objectsToDelete[j] || 
+						   links[i].nodeA == objectsToDelete[j] || 
+						   links[i].nodeB == objectsToDelete[j]) {
+							shouldDelete = true;
+							break;
+						}
+					}
+				}
+				if(shouldDelete) {
 					links.splice(i--, 1);
 				}
 			}
+			
 			selectedObject = null;
+			selectedObjects = [];
 			draw();
 		}
 	}
@@ -473,6 +597,7 @@ function restoreState(state) {
 	nodes = [];
 	links = [];
 	selectedObject = null;
+	selectedObjects = [];
 	
 	// Restore nodes
 	for (var i = 0; i < state.nodes.length; i++) {
@@ -623,6 +748,7 @@ function clearAll() {
 	nodes = [];
 	links = [];
 	selectedObject = null;
+	selectedObjects = [];
 	
 	draw();
 }
